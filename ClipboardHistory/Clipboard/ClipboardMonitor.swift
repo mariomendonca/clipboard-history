@@ -23,7 +23,9 @@ final class ClipboardMonitor {
         Self.activeMonitor = self
         lastChangeCount = pasteboard.changeCount
         timer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
-            self?.captureCurrentPasteboardContentsIfNeeded()
+            MainActor.assumeIsolated {
+                self?.captureCurrentPasteboardContentsIfNeeded()
+            }
         }
     }
 

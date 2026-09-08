@@ -35,14 +35,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             object: nil,
             queue: .main
         ) { [weak self] _ in
-            self?.configureGlobalShortcut()
+            MainActor.assumeIsolated {
+                self?.configureGlobalShortcut()
+            }
         }
         settingsRequestObserver = NotificationCenter.default.addObserver(
             forName: .showClipboardHistorySettings,
             object: nil,
             queue: .main
         ) { [weak self] _ in
-            self?.settingsPanelController.show()
+            MainActor.assumeIsolated {
+                self?.settingsPanelController.show()
+            }
         }
 
         if let startupErrorDescription = ClipboardHistoryStore.startupErrorDescription {
