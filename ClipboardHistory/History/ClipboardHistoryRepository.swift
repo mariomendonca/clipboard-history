@@ -2,20 +2,22 @@ import CryptoKit
 import Foundation
 import SwiftData
 
+@MainActor
 struct ClipboardHistoryRepository {
-    static let defaultNonFavoriteLimit = 500
-
     private let modelContext: ModelContext
     private let nonFavoriteLimit: Int
+    private let nonFavoriteImageStorageLimit: Int
     private let imageStorage: ClipboardImageStorage
 
     init(
         modelContext: ModelContext,
         nonFavoriteLimit: Int = ClipboardSettings.historyLimit,
+        nonFavoriteImageStorageLimit: Int = ClipboardSettings.maximumNonFavoriteImageStorageByteCount,
         imageStorage: ClipboardImageStorage = .shared
     ) {
         self.modelContext = modelContext
         self.nonFavoriteLimit = nonFavoriteLimit
+        self.nonFavoriteImageStorageLimit = nonFavoriteImageStorageLimit
         self.imageStorage = imageStorage
     }
 
@@ -44,8 +46,9 @@ struct ClipboardHistoryRepository {
             textContent: text
         )
         modelContext.insert(entry)
-        try pruneNonFavoriteEntriesIfNeeded()
+        let imagePathsToRemove = try pruneNonFavoriteEntriesIfNeeded()
         try modelContext.save()
+        removeImageFiles(atRelativePaths: imagePathsToRemove)
         return entry
     }
 
@@ -80,13 +83,14 @@ struct ClipboardHistoryRepository {
         modelContext.insert(entry)
 
         do {
-            try pruneNonFavoriteEntriesIfNeeded()
+            let imagePathsToRemove = try pruneNonFavoriteEntriesIfNeeded()
             try modelContext.save()
+            removeImageFiles(atRelativePaths: imagePathsToRemove)
             return entry
         } catch {
+            modelContext.rollback()
             try? imageStorage.removeImageFile(atRelativePath: storedPaths.imageRelativePath)
             try? imageStorage.removeImageFile(atRelativePath: storedPaths.thumbnailRelativePath)
-            modelContext.delete(entry)
             throw error
         }
     }
@@ -115,9 +119,10 @@ struct ClipboardHistoryRepository {
     }
 
     func delete(_ entry: ClipboardEntry) throws {
-        try removeAssociatedImageFiles(for: entry)
+        let imagePaths = imagePaths(for: entry)
         modelContext.delete(entry)
         try modelContext.save()
+        removeImageFiles(atRelativePaths: imagePaths)
     }
 
     func clearNonFavorites() throws {
@@ -126,14 +131,28 @@ struct ClipboardHistoryRepository {
         }
         let entries = try modelContext.fetch(FetchDescriptor<ClipboardEntry>(predicate: predicate))
 
+        let imagePaths = entries.flatMap(imagePaths(for:))
         for entry in entries {
-            try removeAssociatedImageFiles(for: entry)
             modelContext.delete(entry)
         }
         try modelContext.save()
+        removeImageFiles(atRelativePaths: imagePaths)
     }
 
-    private func pruneNonFavoriteEntriesIfNeeded() throws {
+    func enforceRetention() throws {
+        let imagePathsToRemove = try pruneNonFavoriteEntriesIfNeeded()
+        try modelContext.save()
+        removeImageFiles(atRelativePaths: imagePathsToRemove)
+    }
+
+    @discardableResult
+    func reconcileImageStorage() throws -> Int {
+        let entries = try modelContext.fetch(FetchDescriptor<ClipboardEntry>())
+        let referencedPaths = Set(entries.flatMap(imagePaths(for:)))
+        return try imageStorage.removeOrphanedImageFiles(referencedRelativePaths: referencedPaths)
+    }
+
+    private func pruneNonFavoriteEntriesIfNeeded() throws -> [String] {
         let predicate = #Predicate<ClipboardEntry> { entry in
             !entry.isFavorite
         }
@@ -141,19 +160,34 @@ struct ClipboardHistoryRepository {
         descriptor.sortBy = [SortDescriptor(\ClipboardEntry.lastUsedAt, order: .forward)]
 
         let nonFavoriteEntries = try modelContext.fetch(descriptor)
-        let overflow = nonFavoriteEntries.count - nonFavoriteLimit
-        guard overflow > 0 else { return }
+        var entriesToRemove = Array(nonFavoriteEntries.prefix(max(0, nonFavoriteEntries.count - nonFavoriteLimit)))
+        var retainedImageStorageSize = nonFavoriteEntries
+            .dropFirst(entriesToRemove.count)
+            .reduce(0) { $0 + imageStorageSize(for: $1) }
 
-        for entry in nonFavoriteEntries.prefix(overflow) {
-            try removeAssociatedImageFiles(for: entry)
+        for entry in nonFavoriteEntries.dropFirst(entriesToRemove.count) where retainedImageStorageSize > nonFavoriteImageStorageLimit {
+            entriesToRemove.append(entry)
+            retainedImageStorageSize -= imageStorageSize(for: entry)
+        }
+
+        for entry in entriesToRemove {
             modelContext.delete(entry)
         }
+        return entriesToRemove.flatMap(imagePaths(for:))
     }
 
-    private func removeAssociatedImageFiles(for entry: ClipboardEntry) throws {
-        let paths = Set([entry.imageRelativePath, entry.thumbnailRelativePath].compactMap { $0 })
-        for path in paths {
-            try imageStorage.removeImageFile(atRelativePath: path)
+    private func imagePaths(for entry: ClipboardEntry) -> [String] {
+        Array(Set([entry.imageRelativePath, entry.thumbnailRelativePath].compactMap { $0 }))
+    }
+
+    private func imageStorageSize(for entry: ClipboardEntry) -> Int {
+        imagePaths(for: entry).reduce(0) { $0 + imageStorage.imageFileSize(atRelativePath: $1) }
+    }
+
+    private func removeImageFiles(atRelativePaths paths: [String]) {
+        let uniquePaths = Set(paths)
+        for path in uniquePaths {
+            try? imageStorage.removeImageFile(atRelativePath: path)
         }
     }
 }

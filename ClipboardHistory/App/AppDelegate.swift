@@ -1,5 +1,7 @@
 import AppKit
+import SwiftData
 
+@MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var clipboardMonitor: ClipboardMonitor?
     private var globalShortcutMonitor: GlobalShortcutMonitor?
@@ -7,9 +9,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let settingsPanelController = SettingsPanelController()
     private var shortcutPreferenceObserver: NSObjectProtocol?
     private var settingsRequestObserver: NSObjectProtocol?
+    private var activeShortcutOption = GlobalShortcutOption.current
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         let monitor = ClipboardMonitor(modelContainer: ClipboardHistoryStore.sharedContainer)
+        do {
+            let removedFileCount = try ClipboardHistoryRepository(modelContext: ModelContext(ClipboardHistoryStore.sharedContainer))
+                .reconcileImageStorage()
+#if DEBUG
+            if removedFileCount > 0 {
+                print("ClipboardHistory removed \(removedFileCount) orphaned image files.")
+            }
+#endif
+        } catch {
+#if DEBUG
+            print("ClipboardHistory could not reconcile image storage: \(error.localizedDescription)")
+#endif
+        }
         monitor.start()
         clipboardMonitor = monitor
 
@@ -28,6 +44,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         ) { [weak self] _ in
             self?.settingsPanelController.show()
         }
+
+        if let startupErrorDescription = ClipboardHistoryStore.startupErrorDescription {
+            presentPersistenceRecoveryAlert(errorDescription: startupErrorDescription)
+        }
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -42,14 +62,34 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func configureGlobalShortcut() {
-        globalShortcutMonitor?.stop()
-        globalShortcutMonitor = GlobalShortcutMonitor(option: .current) { [weak self] in
+        let requestedOption = GlobalShortcutOption.current
+        let replacement = GlobalShortcutMonitor(option: requestedOption) { [weak self] in
             self?.historyPickerPanelController.show()
         }
+
+        guard replacement.isRegistered else {
+            UserDefaults.standard.set(activeShortcutOption.rawValue, forKey: GlobalShortcutOption.defaultsKey)
+            NotificationCenter.default.post(name: .globalShortcutRegistrationDidFail, object: requestedOption)
+            return
+        }
+
+        globalShortcutMonitor?.stop()
+        globalShortcutMonitor = replacement
+        activeShortcutOption = requestedOption
+    }
+
+    private func presentPersistenceRecoveryAlert(errorDescription: String) {
+        let alert = NSAlert()
+        alert.messageText = "Clipboard history is temporarily unavailable"
+        alert.informativeText = "The local history database could not be opened. Clipboard History is running without saved history for this session. \(errorDescription)"
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "OK")
+        alert.runModal()
     }
 }
 
 extension Notification.Name {
     static let globalShortcutPreferenceDidChange = Notification.Name("globalShortcutPreferenceDidChange")
+    static let globalShortcutRegistrationDidFail = Notification.Name("globalShortcutRegistrationDidFail")
     static let showClipboardHistorySettings = Notification.Name("showClipboardHistorySettings")
 }

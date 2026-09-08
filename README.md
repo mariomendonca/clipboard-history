@@ -20,6 +20,8 @@ The app is configured as a menu-bar-only agent application, so it will not appea
 
 Clipboard history, images, settings, and exclusions stay on this Mac. There is no account, cloud sync, or network access. You can exclude applications by bundle identifier in **Clipboard History → Settings**; exclusion is best-effort because macOS cannot always identify which app created clipboard content.
 
+To keep resource use bounded, the app skips images larger than 40 million pixels or 25 MB after PNG encoding. Non-favorite images share a 250 MB storage budget; older non-favorite items are removed when that budget is exceeded. Favorites are never automatically removed, so use them deliberately.
+
 ## Tests
 
 Run the core test suite from Xcode with `Cmd + U`, or from Terminal:

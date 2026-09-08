@@ -1,6 +1,7 @@
 import AppKit
 import SwiftData
 
+@MainActor
 final class ClipboardMonitor {
     private static var activeMonitor: ClipboardMonitor?
 
@@ -103,8 +104,14 @@ final class ClipboardMonitor {
         }
 
         guard let image = NSImage(pasteboard: pasteboard),
+              let pixelCount = ClipboardImageCodec.pixelCount(of: image),
+              pixelCount <= ClipboardSettings.maximumCapturedImagePixelCount,
               let pngData = ClipboardImageCodec.pngData(from: image),
+              pngData.count <= ClipboardSettings.maximumCapturedImageByteCount,
               let thumbnailPNGData = ClipboardImageCodec.thumbnailPNGData(from: image) else {
+#if DEBUG
+            print("ClipboardHistory skipped an unreadable or oversized image.")
+#endif
             return
         }
 

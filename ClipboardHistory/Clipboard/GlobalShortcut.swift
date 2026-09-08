@@ -36,10 +36,11 @@ final class GlobalShortcutMonitor {
     private var eventHandler: EventHandlerRef?
     private var hotKey: EventHotKeyRef?
     private let action: () -> Void
+    private(set) var isRegistered = false
 
     init(option: GlobalShortcutOption, action: @escaping () -> Void) {
         self.action = action
-        register(option: option)
+        isRegistered = register(option: option)
     }
 
     deinit {
@@ -57,7 +58,7 @@ final class GlobalShortcutMonitor {
         }
     }
 
-    private func register(option: GlobalShortcutOption) {
+    private func register(option: GlobalShortcutOption) -> Bool {
         var eventType = EventTypeSpec(
             eventClass: OSType(kEventClassKeyboard),
             eventKind: UInt32(kEventHotKeyPressed)
@@ -79,11 +80,11 @@ final class GlobalShortcutMonitor {
             &eventHandler
         )
 
-        guard installStatus == noErr else { return }
+        guard installStatus == noErr else { return false }
 
         let identifier = EventHotKeyID(signature: 0x43484B59, id: 1)
         let modifiers = UInt32(controlKey | optionKey)
-        RegisterEventHotKey(
+        let registerStatus = RegisterEventHotKey(
             option.keyCode,
             modifiers,
             identifier,
@@ -91,5 +92,10 @@ final class GlobalShortcutMonitor {
             0,
             &hotKey
         )
+        guard registerStatus == noErr else {
+            stop()
+            return false
+        }
+        return true
     }
 }

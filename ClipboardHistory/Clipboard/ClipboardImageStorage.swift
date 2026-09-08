@@ -1,6 +1,9 @@
 import Foundation
 
 struct ClipboardImageStorage {
+    enum StorageError: Error {
+        case invalidRelativePath
+    }
     struct StoredImagePaths {
         let imageRelativePath: String
         let thumbnailRelativePath: String
@@ -39,7 +42,12 @@ struct ClipboardImageStorage {
 
     /// Resolves a path previously stored on a `ClipboardEntry` without exposing an absolute user path in SwiftData.
     func imageURL(forRelativePath relativePath: String) throws -> URL {
-        try imageDirectoryURL().appendingPathComponent(relativePath)
+        guard !relativePath.isEmpty,
+              !relativePath.contains("/"),
+              !relativePath.contains("\\") else {
+            throw StorageError.invalidRelativePath
+        }
+        return try imageDirectoryURL().appendingPathComponent(relativePath)
     }
 
     func removeImageFile(atRelativePath relativePath: String) throws {
@@ -70,5 +78,32 @@ struct ClipboardImageStorage {
     func imageData(atRelativePath relativePath: String) -> Data? {
         guard let fileURL = try? imageURL(forRelativePath: relativePath) else { return nil }
         return try? Data(contentsOf: fileURL)
+    }
+
+    func imageFileSize(atRelativePath relativePath: String) -> Int {
+        guard let fileURL = try? imageURL(forRelativePath: relativePath),
+              let attributes = try? fileManager.attributesOfItem(atPath: fileURL.path),
+              let size = attributes[.size] as? NSNumber else {
+            return 0
+        }
+        return size.intValue
+    }
+
+    @discardableResult
+    func removeOrphanedImageFiles(referencedRelativePaths: Set<String>) throws -> Int {
+        let directoryURL = try imageDirectoryURL()
+        let fileURLs = try fileManager.contentsOfDirectory(
+            at: directoryURL,
+            includingPropertiesForKeys: nil,
+            options: [.skipsHiddenFiles]
+        )
+        let orphanedFileURLs = fileURLs.filter {
+            $0.pathExtension.lowercased() == "png" && !referencedRelativePaths.contains($0.lastPathComponent)
+        }
+
+        for fileURL in orphanedFileURLs {
+            try fileManager.removeItem(at: fileURL)
+        }
+        return orphanedFileURLs.count
     }
 }

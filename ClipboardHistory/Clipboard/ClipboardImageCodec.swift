@@ -2,6 +2,17 @@ import AppKit
 import Foundation
 
 enum ClipboardImageCodec {
+    static func pixelCount(of image: NSImage) -> Int? {
+        let representations = image.representations
+        guard let largestRepresentation = representations.max(by: {
+            $0.pixelsWide * $0.pixelsHigh < $1.pixelsWide * $1.pixelsHigh
+        }) else {
+            return nil
+        }
+
+        return largestRepresentation.pixelsWide * largestRepresentation.pixelsHigh
+    }
+
     static func pngData(from image: NSImage) -> Data? {
         guard let tiffData = image.tiffRepresentation,
               let bitmap = NSBitmapImageRep(data: tiffData) else {

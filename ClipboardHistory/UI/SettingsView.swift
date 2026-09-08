@@ -60,6 +60,17 @@ struct SettingsView: View {
         .onChange(of: globalShortcutRawValue) { _, _ in
             NotificationCenter.default.post(name: .globalShortcutPreferenceDidChange, object: nil)
         }
+        .onChange(of: historyLimit) { _, _ in
+            do {
+                try ClipboardHistoryRepository(modelContext: modelContext).enforceRetention()
+            } catch {
+                actionError = "The history limit was saved, but existing entries could not be pruned: \(error.localizedDescription)"
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .globalShortcutRegistrationDidFail)) { notification in
+            let shortcut = (notification.object as? GlobalShortcutOption)?.displayName ?? "selected shortcut"
+            actionError = "\(shortcut) is unavailable because another app or macOS is already using it. Your previous shortcut was kept."
+        }
         .alert("Clipboard History", isPresented: Binding(
             get: { actionError != nil },
             set: { if !$0 { actionError = nil } }

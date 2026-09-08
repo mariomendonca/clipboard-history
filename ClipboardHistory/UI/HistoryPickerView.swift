@@ -95,6 +95,11 @@ struct HistoryPickerView: View {
         .onChange(of: globalShortcutRawValue) { _, _ in
             NotificationCenter.default.post(name: .globalShortcutPreferenceDidChange, object: nil)
         }
+        .onReceive(NotificationCenter.default.publisher(for: .globalShortcutRegistrationDidFail)) { notification in
+            let shortcut = (notification.object as? GlobalShortcutOption)?.displayName ?? "selected shortcut"
+            actionError = "\(shortcut) is unavailable because another app or macOS is already using it. Your previous shortcut was kept."
+        }
+        .onExitCommand(perform: closePicker)
         .alert("Clipboard History", isPresented: Binding(
             get: { actionError != nil },
             set: { if !$0 { actionError = nil } }
@@ -135,12 +140,14 @@ struct HistoryPickerView: View {
             }
             .menuStyle(.borderlessButton)
             .accessibilityLabel("Global shortcut settings")
+            .help("Settings")
 
             Button(action: closePicker) {
                 Image(systemName: "xmark")
             }
             .buttonStyle(.plain)
             .accessibilityLabel("Close clipboard history")
+            .help("Close")
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
@@ -264,8 +271,9 @@ private struct HistoryEntryListRow: View {
                 Button(action: onToggleImagePreview) {
                     Image(systemName: isImageExpanded ? "arrow.down.right.and.arrow.up.left" : "arrow.up.left.and.arrow.down.right")
                 }
-                .buttonStyle(.borderless)
-                .accessibilityLabel(isImageExpanded ? "Hide image preview" : "Show image preview")
+            .buttonStyle(.borderless)
+            .accessibilityLabel(isImageExpanded ? "Hide image preview" : "Show image preview")
+            .help(isImageExpanded ? "Hide image preview" : "Show image preview")
             }
 
             Button(action: onToggleFavorite) {
@@ -273,12 +281,14 @@ private struct HistoryEntryListRow: View {
             }
             .buttonStyle(.borderless)
             .accessibilityLabel(entry.isFavorite ? "Remove from favorites" : "Add to favorites")
+            .help(entry.isFavorite ? "Remove from favorites" : "Add to favorites")
 
             Button(role: .destructive, action: onDelete) {
                 Image(systemName: "trash")
             }
             .buttonStyle(.borderless)
             .accessibilityLabel("Delete entry")
+            .help("Delete entry")
         }
     }
 }
@@ -325,6 +335,7 @@ private struct ClipboardThumbnail: View {
             }
         }
         .frame(width: 32, height: 32)
+        .accessibilityHidden(true)
     }
 }
 

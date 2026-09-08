@@ -2,6 +2,7 @@ import SwiftData
 import XCTest
 @testable import ClipboardHistory
 
+@MainActor
 final class ClipboardHistoryTests: XCTestCase {
     private var modelContainer: ModelContainer!
     private var modelContext: ModelContext!
@@ -81,6 +82,43 @@ final class ClipboardHistoryTests: XCTestCase {
         XCTAssertNil(imageStorage.imageData(atRelativePath: paths.imageRelativePath))
         XCTAssertNil(imageStorage.imageData(atRelativePath: paths.thumbnailRelativePath))
         XCTAssertTrue(try fetchEntries().isEmpty)
+    }
+
+    func testImageStorageBudgetPrunesOldestNonFavoriteImage() throws {
+        let repository = ClipboardHistoryRepository(
+            modelContext: modelContext,
+            nonFavoriteLimit: 10,
+            nonFavoriteImageStorageLimit: 10,
+            imageStorage: imageStorage
+        )
+        let firstEntry = try repository.saveImage(
+            pngData: Data([1, 2, 3, 4]),
+            thumbnailPNGData: Data([5, 6]),
+            at: Date(timeIntervalSince1970: 1)
+        )
+        let firstImagePath = try XCTUnwrap(firstEntry.imageRelativePath)
+
+        _ = try repository.saveImage(
+            pngData: Data([7, 8, 9, 10]),
+            thumbnailPNGData: Data([11, 12]),
+            at: Date(timeIntervalSince1970: 2)
+        )
+
+        XCTAssertEqual(try fetchEntries().count, 1)
+        XCTAssertNil(imageStorage.imageData(atRelativePath: firstImagePath))
+    }
+
+    func testReconciliationRemovesUnreferencedImageFiles() throws {
+        let orphanedPaths = try imageStorage.storeImage(
+            pngData: Data([1, 2, 3]),
+            thumbnailPNGData: Data([4, 5, 6])
+        )
+
+        let removedFileCount = try makeRepository(limit: 10).reconcileImageStorage()
+
+        XCTAssertEqual(removedFileCount, 2)
+        XCTAssertNil(imageStorage.imageData(atRelativePath: orphanedPaths.imageRelativePath))
+        XCTAssertNil(imageStorage.imageData(atRelativePath: orphanedPaths.thumbnailRelativePath))
     }
 
     func testExcludedApplicationDecision() {

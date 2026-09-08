@@ -16,7 +16,6 @@ final class ClipboardEntry {
     var contentHash: String
     var textContent: String?
     var imageRelativePath: String?
-    var thumbnailData: Data?
     var thumbnailRelativePath: String?
 
     var contentKind: ClipboardContentKind {
@@ -33,7 +32,6 @@ final class ClipboardEntry {
         contentHash: String,
         textContent: String? = nil,
         imageRelativePath: String? = nil,
-        thumbnailData: Data? = nil,
         thumbnailRelativePath: String? = nil
     ) {
         self.id = id
@@ -44,7 +42,6 @@ final class ClipboardEntry {
         self.contentHash = contentHash
         self.textContent = textContent
         self.imageRelativePath = imageRelativePath
-        self.thumbnailData = thumbnailData
         self.thumbnailRelativePath = thumbnailRelativePath
     }
 }

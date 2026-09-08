@@ -4,6 +4,9 @@ enum ClipboardSettings {
     static let historyLimitKey = "historyLimit"
     static let excludedApplicationBundleIdentifiersKey = "excludedApplicationBundleIdentifiers"
     static let defaultHistoryLimit = 500
+    static let maximumCapturedImagePixelCount = 40_000_000
+    static let maximumCapturedImageByteCount = 25 * 1_024 * 1_024
+    static let maximumNonFavoriteImageStorageByteCount = 250 * 1_024 * 1_024
     static let starterExcludedBundleIdentifiers = [
         "com.1password.1password",
         "com.agilebits.onepassword7",
@@ -18,19 +21,15 @@ enum ClipboardSettings {
     }
 
     static var excludedApplicationBundleIdentifiers: [String] {
-        guard let data = UserDefaults.standard.data(forKey: excludedApplicationBundleIdentifiersKey),
-              let identifiers = try? JSONDecoder().decode([String].self, from: data) else {
-            return starterExcludedBundleIdentifiers
-        }
-        return identifiers
+        UserDefaults.standard.stringArray(forKey: excludedApplicationBundleIdentifiersKey)
+            ?? starterExcludedBundleIdentifiers
     }
 
     static func setExcludedApplicationBundleIdentifiers(_ identifiers: [String]) {
         let normalizedIdentifiers = Array(Set(identifiers.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }))
             .sorted()
-        let data = try? JSONEncoder().encode(normalizedIdentifiers)
-        UserDefaults.standard.set(data, forKey: excludedApplicationBundleIdentifiersKey)
+        UserDefaults.standard.set(normalizedIdentifiers, forKey: excludedApplicationBundleIdentifiersKey)
     }
 
     static func shouldCapture(frontmostApplicationBundleIdentifier: String?) -> Bool {
