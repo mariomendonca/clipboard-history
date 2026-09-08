@@ -9,7 +9,7 @@ final class HistoryPickerPanelController {
     func show() {
         if panel == nil {
             let panel = NSPanel(
-                contentRect: NSRect(x: 0, y: 0, width: 380, height: 420),
+                contentRect: NSRect(x: 0, y: 0, width: 460, height: 560),
                 styleMask: [.titled, .closable, .resizable, .utilityWindow],
                 backing: .buffered,
                 defer: false

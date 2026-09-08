@@ -4,6 +4,7 @@ import SwiftUI
 
 struct SettingsView: View {
     @Environment(\.modelContext) private var modelContext
+    @Query private var entries: [ClipboardEntry]
     @AppStorage(ClipboardSettings.historyLimitKey) private var historyLimit = ClipboardSettings.defaultHistoryLimit
     @AppStorage(GlobalShortcutOption.defaultsKey) private var globalShortcutRawValue = GlobalShortcutOption.controlOptionV.rawValue
     @State private var excludedBundleIdentifiers = ClipboardSettings.excludedApplicationBundleIdentifiers
@@ -56,7 +57,7 @@ struct SettingsView: View {
         }
         .formStyle(.grouped)
         .padding()
-        .frame(width: 510, height: 500)
+        .frame(minWidth: 510, minHeight: 500)
         .onChange(of: globalShortcutRawValue) { _, _ in
             NotificationCenter.default.post(name: .globalShortcutPreferenceDidChange, object: nil)
         }
@@ -97,7 +98,8 @@ struct SettingsView: View {
     private func confirmClearNonFavorites() {
         let alert = NSAlert()
         alert.messageText = "Clear all non-favorite clipboard entries?"
-        alert.informativeText = "Favorites will be kept. This action cannot be undone."
+        let count = entries.filter { !$0.isFavorite }.count
+        alert.informativeText = "This removes \(count) \(count == 1 ? "entry" : "entries"). Favorites will be kept. This action cannot be undone."
         alert.alertStyle = .warning
         alert.addButton(withTitle: "Clear Non-Favorites")
         alert.addButton(withTitle: "Cancel")

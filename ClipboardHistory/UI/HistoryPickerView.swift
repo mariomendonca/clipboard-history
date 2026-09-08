@@ -18,8 +18,9 @@ struct HistoryPickerView: View {
     @AppStorage(GlobalShortcutOption.defaultsKey) private var globalShortcutRawValue = GlobalShortcutOption.controlOptionV.rawValue
     @State private var filter: Filter = .all
     @State private var searchText = ""
-    @State private var expandedImageID: UUID?
+    @State private var previewedImage: ClipboardEntry?
     @State private var actionError: String?
+    @FocusState private var isSearchFocused: Bool
 
     init(onClose: (() -> Void)? = nil) {
         self.onClose = onClose
@@ -39,10 +40,11 @@ struct HistoryPickerView: View {
         VStack(spacing: 0) {
             header
 
-            TextField("Search history", text: $searchText)
+            TextField("Search text history", text: $searchText)
                 .textFieldStyle(.roundedBorder)
+                .focused($isSearchFocused)
                 .padding(.horizontal, 16)
-                .padding(.bottom, 10)
+                .padding(.bottom, 8)
 
             Picker("History filter", selection: $filter) {
                 ForEach(Filter.allCases) { filter in
@@ -62,10 +64,9 @@ struct HistoryPickerView: View {
                 List(displayedEntries) { entry in
                     HistoryEntryListRow(
                         entry: entry,
-                        isImageExpanded: expandedImageID == entry.id,
                         onRestoreText: { text in restoreText(entry, text: text) },
                         onRestoreImage: { restoreImage(entry) },
-                        onToggleImagePreview: { toggleImagePreview(for: entry) },
+                        onShowImagePreview: { previewedImage = entry },
                         onToggleFavorite: { toggleFavorite(for: entry) },
                         onDelete: { delete(entry) }
                     )
@@ -83,6 +84,10 @@ struct HistoryPickerView: View {
 
                 Spacer()
 
+                Text("\(displayedEntries.count) \(displayedEntries.count == 1 ? "item" : "items")")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
                 Button("Quit") {
                     NSApplication.shared.terminate(nil)
                 }
@@ -91,7 +96,12 @@ struct HistoryPickerView: View {
             .padding(.horizontal, 16)
             .padding(.vertical, 10)
         }
-        .frame(width: 380, height: 470)
+        .frame(minWidth: 380, idealWidth: 460, minHeight: 470, idealHeight: 560)
+        .onAppear {
+            DispatchQueue.main.async {
+                isSearchFocused = true
+            }
+        }
         .onChange(of: globalShortcutRawValue) { _, _ in
             NotificationCenter.default.post(name: .globalShortcutPreferenceDidChange, object: nil)
         }
@@ -100,6 +110,20 @@ struct HistoryPickerView: View {
             actionError = "\(shortcut) is unavailable because another app or macOS is already using it. Your previous shortcut was kept."
         }
         .onExitCommand(perform: closePicker)
+        .popover(item: $previewedImage, arrowEdge: .trailing) { entry in
+            VStack(alignment: .leading, spacing: 12) {
+                Text("Image Preview")
+                    .font(.headline)
+
+                ClipboardImagePreview(relativePath: entry.imageRelativePath)
+                    .frame(width: 460, height: 320)
+
+                Text(entry.lastUsedAt, format: .dateTime.month(.abbreviated).day().hour().minute())
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            .padding()
+        }
         .alert("Clipboard History", isPresented: Binding(
             get: { actionError != nil },
             set: { if !$0 { actionError = nil } }
@@ -111,9 +135,15 @@ struct HistoryPickerView: View {
     }
 
     private var header: some View {
-        HStack {
-            Text("Clipboard History")
-                .font(.headline)
+        HStack(alignment: .firstTextBaseline) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Clipboard History")
+                    .font(.title3.weight(.semibold))
+
+                Text("Select an item to copy it back to the clipboard")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
 
             Spacer()
 
@@ -193,10 +223,6 @@ struct HistoryPickerView: View {
         }
     }
 
-    private func toggleImagePreview(for entry: ClipboardEntry) {
-        expandedImageID = expandedImageID == entry.id ? nil : entry.id
-    }
-
     private func closePicker() {
         if let onClose {
             onClose()
@@ -220,7 +246,8 @@ struct HistoryPickerView: View {
     private func confirmClearNonFavorites() {
         let alert = NSAlert()
         alert.messageText = "Clear all non-favorite clipboard entries?"
-        alert.informativeText = "Favorites will be kept. This action cannot be undone."
+        let count = entries.filter { !$0.isFavorite }.count
+        alert.informativeText = "This removes \(count) \(count == 1 ? "entry" : "entries"). Favorites will be kept. This action cannot be undone."
         alert.alertStyle = .warning
         alert.addButton(withTitle: "Clear Non-Favorites")
         alert.addButton(withTitle: "Cancel")
@@ -240,18 +267,18 @@ struct HistoryPickerView: View {
 
 private struct HistoryEntryListRow: View {
     let entry: ClipboardEntry
-    let isImageExpanded: Bool
     let onRestoreText: (String) -> Void
     let onRestoreImage: () -> Void
-    let onToggleImagePreview: () -> Void
+    let onShowImagePreview: () -> Void
     let onToggleFavorite: () -> Void
     let onDelete: () -> Void
+    @State private var isHovered = false
 
     var body: some View {
         HStack(alignment: .top, spacing: 8) {
             if let text = entry.textContent, entry.contentKind == .text {
                 Button { onRestoreText(text) } label: {
-                    ClipboardEntryRow(entry: entry, isImageExpanded: false)
+                    ClipboardEntryRow(entry: entry)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .contentShape(Rectangle())
                 }
@@ -259,7 +286,7 @@ private struct HistoryEntryListRow: View {
                 .help("Copy to clipboard")
             } else {
                 Button(action: onRestoreImage) {
-                    ClipboardEntryRow(entry: entry, isImageExpanded: isImageExpanded)
+                    ClipboardEntryRow(entry: entry)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .contentShape(Rectangle())
                 }
@@ -268,12 +295,12 @@ private struct HistoryEntryListRow: View {
             }
 
             if entry.contentKind == .image {
-                Button(action: onToggleImagePreview) {
-                    Image(systemName: isImageExpanded ? "arrow.down.right.and.arrow.up.left" : "arrow.up.left.and.arrow.down.right")
+                Button(action: onShowImagePreview) {
+                    Image(systemName: "eye")
                 }
-            .buttonStyle(.borderless)
-            .accessibilityLabel(isImageExpanded ? "Hide image preview" : "Show image preview")
-            .help(isImageExpanded ? "Hide image preview" : "Show image preview")
+                .buttonStyle(.borderless)
+                .accessibilityLabel("Show image preview")
+                .help("Show image preview")
             }
 
             Button(action: onToggleFavorite) {
@@ -290,35 +317,45 @@ private struct HistoryEntryListRow: View {
             .accessibilityLabel("Delete entry")
             .help("Delete entry")
         }
+        .padding(.horizontal, 6)
+        .padding(.vertical, 5)
+        .background {
+            RoundedRectangle(cornerRadius: 7, style: .continuous)
+                .fill(isHovered ? Color.accentColor.opacity(0.10) : .clear)
+        }
+        .onHover { isHovered = $0 }
     }
 }
 
 private struct ClipboardEntryRow: View {
     let entry: ClipboardEntry
-    let isImageExpanded: Bool
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(alignment: .top, spacing: 10) {
-                ClipboardThumbnail(entry: entry)
+        HStack(alignment: .top, spacing: 10) {
+            ClipboardThumbnail(entry: entry)
 
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(entry.contentKind == .text ? (entry.textContent ?? "Text unavailable") : "Image")
-                        .lineLimit(2)
-                        .truncationMode(.tail)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(entry.contentKind == .text ? (entry.textContent ?? "Text unavailable") : "Image")
+                    .font(.body)
+                    .lineLimit(2)
+                    .truncationMode(.tail)
 
+                HStack(spacing: 6) {
                     Text(entry.lastUsedAt, format: .dateTime.month(.abbreviated).day().hour().minute())
                         .font(.caption)
                         .foregroundStyle(.secondary)
+
+                    if entry.contentKind == .text, let text = entry.textContent {
+                        Text("•")
+                            .font(.caption)
+                            .foregroundStyle(.tertiary)
+                        Text("\(text.count) characters")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
                 }
             }
-
-            if isImageExpanded, entry.contentKind == .image {
-                ClipboardImagePreview(relativePath: entry.imageRelativePath)
-                    .frame(maxWidth: .infinity)
-            }
         }
-        .padding(.vertical, 4)
     }
 }
 
@@ -334,7 +371,8 @@ private struct ClipboardThumbnail: View {
                     .foregroundStyle(.secondary)
             }
         }
-        .frame(width: 32, height: 32)
+        .frame(width: 36, height: 36)
+        .background(Color.primary.opacity(entry.contentKind == .image ? 0 : 0.06), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
         .accessibilityHidden(true)
     }
 }
