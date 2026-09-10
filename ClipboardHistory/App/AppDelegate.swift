@@ -93,6 +93,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 }
 
 extension Notification.Name {
+    static let historyPickerDidShow = Notification.Name("historyPickerDidShow")
     static let globalShortcutPreferenceDidChange = Notification.Name("globalShortcutPreferenceDidChange")
     static let globalShortcutRegistrationDidFail = Notification.Name("globalShortcutRegistrationDidFail")
     static let showClipboardHistorySettings = Notification.Name("showClipboardHistorySettings")

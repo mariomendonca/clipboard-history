@@ -26,5 +26,6 @@ final class HistoryPickerPanelController {
 
         NSApplication.shared.activate(ignoringOtherApps: true)
         panel?.makeKeyAndOrderFront(nil)
+        NotificationCenter.default.post(name: .historyPickerDidShow, object: nil)
     }
 }

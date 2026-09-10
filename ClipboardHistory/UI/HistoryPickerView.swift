@@ -3,6 +3,11 @@ import SwiftData
 import SwiftUI
 
 struct HistoryPickerView: View {
+    private enum FocusedArea: Hashable {
+        case historyList
+        case search
+    }
+
     private enum Filter: String, CaseIterable, Identifiable {
         case all = "All"
         case favorites = "Favorites"
@@ -20,7 +25,8 @@ struct HistoryPickerView: View {
     @State private var searchText = ""
     @State private var previewedImage: ClipboardEntry?
     @State private var actionError: String?
-    @FocusState private var isSearchFocused: Bool
+    @State private var selectedEntryID: ClipboardEntry.ID?
+    @FocusState private var focusedArea: FocusedArea?
 
     init(onClose: (() -> Void)? = nil) {
         self.onClose = onClose
@@ -42,7 +48,11 @@ struct HistoryPickerView: View {
 
             TextField("Search text history", text: $searchText)
                 .textFieldStyle(.roundedBorder)
-                .focused($isSearchFocused)
+                .focused($focusedArea, equals: .search)
+                .onKeyPress(.downArrow) {
+                    selectFirstSearchResult()
+                    return .handled
+                }
                 .padding(.horizontal, 16)
                 .padding(.bottom, 8)
 
@@ -61,17 +71,43 @@ struct HistoryPickerView: View {
             if displayedEntries.isEmpty {
                 emptyState
             } else {
-                List(displayedEntries) { entry in
-                    HistoryEntryListRow(
-                        entry: entry,
-                        onRestoreText: { text in restoreText(entry, text: text) },
-                        onRestoreImage: { restoreImage(entry) },
-                        onShowImagePreview: { previewedImage = entry },
-                        onToggleFavorite: { toggleFavorite(for: entry) },
-                        onDelete: { delete(entry) }
-                    )
+                ScrollViewReader { scrollProxy in
+                    List(selection: $selectedEntryID) {
+                        ForEach(displayedEntries) { entry in
+                            HistoryEntryListRow(
+                                entry: entry,
+                                isSelected: selectedEntryID == entry.id,
+                                onRestoreText: { text in restoreText(entry, text: text) },
+                                onRestoreImage: { restoreImage(entry) },
+                                onShowImagePreview: { previewedImage = entry },
+                                onToggleFavorite: { toggleFavorite(for: entry) },
+                                onDelete: { delete(entry) }
+                            )
+                            .id(entry.id)
+                            .tag(entry.id)
+                        }
+                    }
+                    .listStyle(.plain)
+                    .focused($focusedArea, equals: .historyList)
+                    .onKeyPress(.upArrow) {
+                        moveSelection(by: -1)
+                        return .handled
+                    }
+                    .onKeyPress(.downArrow) {
+                        moveSelection(by: 1)
+                        return .handled
+                    }
+                    .onKeyPress(.return) {
+                        copySelectedEntry()
+                        return .handled
+                    }
+                    .onChange(of: selectedEntryID) { _, entryID in
+                        guard let entryID else { return }
+                        withAnimation(.easeOut(duration: 0.12)) {
+                            scrollProxy.scrollTo(entryID, anchor: .center)
+                        }
+                    }
                 }
-                .listStyle(.plain)
             }
 
             Divider()
@@ -98,9 +134,18 @@ struct HistoryPickerView: View {
         }
         .frame(minWidth: 380, idealWidth: 460, minHeight: 470, idealHeight: 560)
         .onAppear {
-            DispatchQueue.main.async {
-                isSearchFocused = true
-            }
+            resetForPresentation()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .historyPickerDidShow)) { _ in
+            resetForPresentation()
+        }
+        .onChange(of: searchText) { _, _ in
+            selectedEntryID = nil
+        }
+        .onKeyPress(characters: CharacterSet(charactersIn: "f"), phases: .down) { keyPress in
+            guard keyPress.modifiers.contains(.command) else { return .ignored }
+            focusedArea = .search
+            return .handled
         }
         .onChange(of: globalShortcutRawValue) { _, _ in
             NotificationCenter.default.post(name: .globalShortcutPreferenceDidChange, object: nil)
@@ -140,7 +185,7 @@ struct HistoryPickerView: View {
                 Text("Clipboard History")
                     .font(.title3.weight(.semibold))
 
-                Text("Select an item to copy it back to the clipboard")
+                Text("Use \u{2191}/\u{2193} to select, Return to copy, and \u{2318}F to search")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -224,6 +269,9 @@ struct HistoryPickerView: View {
     }
 
     private func closePicker() {
+        searchText = ""
+        filter = .all
+        selectedEntryID = nil
         if let onClose {
             onClose()
         } else {
@@ -263,10 +311,51 @@ struct HistoryPickerView: View {
             actionError = error.localizedDescription
         }
     }
+
+    private func resetForPresentation() {
+        searchText = ""
+        filter = .all
+        selectedEntryID = displayedEntries.first?.id
+        previewedImage = nil
+        DispatchQueue.main.async {
+            focusedArea = .historyList
+        }
+    }
+
+    private func selectFirstSearchResult() {
+        guard !displayedEntries.isEmpty else { return }
+        selectedEntryID = displayedEntries[0].id
+        focusedArea = .historyList
+    }
+
+    private func moveSelection(by offset: Int) {
+        guard !displayedEntries.isEmpty else { return }
+
+        guard let selectedEntryID,
+              let currentIndex = displayedEntries.firstIndex(where: { $0.id == selectedEntryID }) else {
+            self.selectedEntryID = displayedEntries[0].id
+            return
+        }
+
+        let nextIndex = min(max(currentIndex + offset, 0), displayedEntries.count - 1)
+        self.selectedEntryID = displayedEntries[nextIndex].id
+    }
+
+    private func copySelectedEntry() {
+        guard let selectedEntryID,
+              let entry = displayedEntries.first(where: { $0.id == selectedEntryID }) else { return }
+
+        if entry.contentKind == .text, let text = entry.textContent {
+            restoreText(entry, text: text)
+        } else {
+            restoreImage(entry)
+        }
+    }
 }
 
 private struct HistoryEntryListRow: View {
     let entry: ClipboardEntry
+    let isSelected: Bool
     let onRestoreText: (String) -> Void
     let onRestoreImage: () -> Void
     let onShowImagePreview: () -> Void
@@ -321,7 +410,7 @@ private struct HistoryEntryListRow: View {
         .padding(.vertical, 5)
         .background {
             RoundedRectangle(cornerRadius: 7, style: .continuous)
-                .fill(isHovered ? Color.accentColor.opacity(0.10) : .clear)
+                .fill(isSelected ? Color.accentColor.opacity(0.22) : (isHovered ? Color.accentColor.opacity(0.10) : .clear))
         }
         .onHover { isHovered = $0 }
     }
